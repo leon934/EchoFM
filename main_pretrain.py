@@ -326,6 +326,9 @@ def main(args):
         loss_scaler=loss_scaler,
     )
 
+    print("everything works")
+    return
+
     checkpoint_path = ""
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
