@@ -210,6 +210,8 @@ def get_args_parser():
 
 
 def main(args):
+    args.distributed = False
+
     misc.init_distributed_mode(args)
 
     print("job dir: {}".format(os.path.dirname(os.path.realpath(__file__))))
@@ -241,7 +243,9 @@ def main(args):
 
     cudnn.benchmark = True
 
-    dataset_train = EchoDataset_from_Video_mp4(args.data_path)
+    dataset_train = EchoDataset_from_Video_mp4(
+        folder=args.data_path    
+    )
     
     if args.distributed:
         num_tasks = misc.get_world_size()
@@ -325,9 +329,6 @@ def main(args):
         optimizer=optimizer,
         loss_scaler=loss_scaler,
     )
-
-    print("everything works")
-    return
 
     checkpoint_path = ""
     print(f"Start training for {args.epochs} epochs")

@@ -9,11 +9,13 @@ from typing import Tuple, List
 # from beartype.door import is_bearable
 
 import numpy as np
+import pandas as pd
 
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader as PytorchDataLoader
 from torchvision import transforms as T, utils
+from torchvision.transforms import v2
 
 from einops import rearrange
 import os
@@ -387,70 +389,172 @@ def process_ultrasound_image(video_tensor):
     
     return result
 
+# class EchoDataset_from_Video_mp4(Dataset):
+#     def __init__(
+#         self,
+#         folder,
+#         image_size = [224, 224],
+#         channels = 3,
+#     ):
+#         super().__init__()
+#         self.folder = folder
+        
+#         self.image_size = image_size
+#         self.channels = channels
+        
+#         def apply_augmentation(img, shear_x, shear_y, contrast_factor):
+#             # Apply contrast augmentation
+#             img = T.functional.adjust_contrast(img, contrast_factor)
+
+#             # # Apply shear x, y augmentation
+#             img = T.functional.affine(img, angle=0, translate=[0, 0], scale=1.0, shear=[shear_x, shear_y])
+                
+#             return img
+        
+#         def create_transform(image_size):
+#             # def transform(img, shear_x, shear_y, contrast_factor):
+#             def transform(img):
+#                 if not isinstance(img, Image.Image):
+#                     img = T.ToPILImage()(img)
+#                 img = T.Resize(image_size)(img)
+#                 # img = apply_augmentation(img, shear_x, shear_y, contrast_factor)
+#                 return T.ToTensor()(img)
+#             return transform
+
+#         self.transform_for_videos = create_transform(self.image_size)
+        
+#         self.transform = T.Compose([
+#             T.Resize(image_size),
+#             T.ToTensor()
+#         ])
+#         self.paths = os.listdir(folder)
+        
+#         self.mp4_to_tensor = partial(
+#             video_to_tensor, transform=self.transform_for_videos, crop_size=self.image_size, num_frames=10)
+
+#         force_num_frames = True
+        
+#         self.cast_num_frames_fn = partial(
+#             cast_num_frames, frames=32) if force_num_frames else identity
+        
+#     def __len__(self):
+#         return len(self.paths)
+
+#     def __getitem__(self, index):
+#         path = self.paths[index]
+
+#         path = os.path.join(self.folder, path)
+#         tensor = self.mp4_to_tensor(str(path))
+
+#         tensor = self.cast_num_frames_fn(tensor)
+        
+#         # print ("Check Final output : ", tensor.size())
+        
+#         # save_tensor_as_grid(tensor, grid_size=4, save_path="grid_image.png")
+#         # data =  {"image":tensor , "p_id" : self.paths[index]}
+#         return tensor
+
 class EchoDataset_from_Video_mp4(Dataset):
     def __init__(
         self,
-        folder,
-        image_size = [224, 224],
-        channels = 3,
+        folder,  
+        split="TRAIN", 
+        image_size=(224, 224),
+        num_frames=16, 
     ):
         super().__init__()
         self.folder = folder
-        
         self.image_size = image_size
-        self.channels = channels
-        
-        def apply_augmentation(img, shear_x, shear_y, contrast_factor):
-            # Apply contrast augmentation
-            img = T.functional.adjust_contrast(img, contrast_factor)
+        self.num_frames = num_frames
 
-            # # Apply shear x, y augmentation
-            img = T.functional.affine(img, angle=0, translate=[0, 0], scale=1.0, shear=[shear_x, shear_y])
-                
-            return img
+        # --- 1. Load EchoNet-Dynamic CSV ---
+        csv_path = os.path.join(folder, "FileList.csv")
+        df = pd.read_csv(csv_path)
         
-        def create_transform(image_size):
-            # def transform(img, shear_x, shear_y, contrast_factor):
-            def transform(img):
-                if not isinstance(img, Image.Image):
-                    img = T.ToPILImage()(img)
-                img = T.Resize(image_size)(img)
-                # img = apply_augmentation(img, shear_x, shear_y, contrast_factor)
-                return T.ToTensor()(img)
-            return transform
+        df = df[df["Split"].str.upper() == split.upper()]
+        
+        self.paths = df["FileName"].tolist()
 
-        self.transform_for_videos = create_transform(self.image_size)
-        
-        self.transform = T.Compose([
-            T.Resize(image_size),
-            T.ToTensor()
+        # --- 2. Define Transforms (Strictly matching original logic) ---
+        # Original: Resize -> CenterCrop -> ToTensor (No Normalize)
+        self.transform = v2.Compose([
+            v2.Resize(image_size, antialias=True),
+            v2.CenterCrop(image_size),
+            v2.ToDtype(torch.float32, scale=True), # This is v2's equivalent of ToTensor()
         ])
-        self.paths = os.listdir(folder)
         
-        self.mp4_to_tensor = partial(
-            video_to_tensor, transform=self.transform_for_videos, crop_size=self.image_size, num_frames=10)
+        # --- 3. Internal Helper for Loading ---
+        self.mp4_to_tensor = self._load_and_transform_video
 
-        force_num_frames = True
-        
-        self.cast_num_frames_fn = partial(
-            cast_num_frames, frames=32) if force_num_frames else identity
-        
+        # --- 4. Internal Helper for Frame Casting ---
+        self.cast_num_frames_fn = partial(self._temporal_sample, target_frames=num_frames)
+
     def __len__(self):
         return len(self.paths)
 
     def __getitem__(self, index):
-        path = self.paths[index]
+        filename = self.paths[index]
+            
+        path = os.path.join(self.folder, "Videos", filename)
 
-        path = os.path.join(self.folder, path)
-        tensor = self.mp4_to_tensor(str(path))
+        # 1. Load & Transform
+        tensor = self.mp4_to_tensor(path)
 
+        # 2. Force Frame Count
         tensor = self.cast_num_frames_fn(tensor)
         
-        # print ("Check Final output : ", tensor.size())
-        
-        # save_tensor_as_grid(tensor, grid_size=4, save_path="grid_image.png")
-        # data =  {"image":tensor , "p_id" : self.paths[index]}
+        # Returns: (C, T, H, W)
         return tensor
+
+    # --- INTERNAL HELPERS ---
+
+    def _load_and_transform_video(self, path):
+        cap = cv2.VideoCapture(path)
+        frames = []
+        try:
+            while True:
+                ret, frame = cap.read()
+                if not ret: break
+                # Convert BGR (OpenCV) to RGB
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frames.append(frame)
+        finally:
+            cap.release()
+
+        # Stack -> (T, H, W, C)
+        video_tensor = torch.from_numpy(np.stack(frames))
+        
+        # Permute to (T, C, H, W) for Transforms
+        video_tensor = video_tensor.permute(0, 3, 1, 2)
+
+        # Repeat Channels if Grayscale (T, 1, H, W) -> (T, 3, H, W)
+        if video_tensor.shape[1] == 1:
+            video_tensor = video_tensor.repeat(1, 3, 1, 1)
+
+        # Apply Transform (Resize -> Crop -> ToTensor)
+        video_tensor = self.transform(video_tensor)
+        
+        # Permute to (C, T, H, W) for Model
+        return video_tensor.permute(1, 0, 2, 3)
+
+    def _temporal_sample(self, video_tensor, target_frames):
+        # Input shape: (C, T, H, W)
+        _, T, _, _ = video_tensor.shape
+        
+        if T == target_frames:
+            return video_tensor
+        elif T > target_frames:
+            # Random crop
+            start = np.random.randint(0, T - target_frames + 1)
+            return video_tensor[:, start:start+target_frames, :, :]
+        else:
+            # Loop/Pad
+            diff = target_frames - T
+            padding = video_tensor
+            while padding.shape[1] < diff:
+                padding = torch.cat([padding, video_tensor], dim=1)
+            # Slice exact diff needed
+            return torch.cat([video_tensor, padding[:, :diff, :, :]], dim=1)
         
          
 class EchoDataset_from_Video(Dataset):
