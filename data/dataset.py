@@ -8,6 +8,8 @@ from functools import partial
 from typing import Tuple, List
 # from beartype.door import is_bearable
 
+import av
+
 import numpy as np
 import pandas as pd
 
@@ -458,7 +460,8 @@ class EchoDataset_from_Video_mp4(Dataset):
     def __init__(
         self,
         folder,  
-        split="TRAIN", 
+        split="TRAIN",
+        target_metric="EF",
         image_size=(224, 224),
         num_frames=16, 
     ):
@@ -466,14 +469,24 @@ class EchoDataset_from_Video_mp4(Dataset):
         self.folder = folder
         self.image_size = image_size
         self.num_frames = num_frames
+        self.split = split
+        self.target_metric = target_metric
 
         # --- 1. Load EchoNet-Dynamic CSV ---
         csv_path = os.path.join(folder, "FileList.csv")
         df = pd.read_csv(csv_path)
         
-        df = df[df["Split"].str.upper() == split.upper()]
+        df = df[df["Split"].str.upper() == self.split.upper()]
         
         self.paths = df["FileName"].tolist()
+
+        raw_labels = df[self.target_metric].values.astype(np.float32)
+
+        if self.target_metric in ("ESV", "EDV"):
+            self.labels = np.log(raw_labels)
+        else:
+            # for ef
+            self.labels = raw_labels / 100.0
 
         # --- 2. Define Transforms (Strictly matching original logic) ---
         # Original: Resize -> CenterCrop -> ToTensor (No Normalize)
@@ -504,32 +517,18 @@ class EchoDataset_from_Video_mp4(Dataset):
         tensor = self.cast_num_frames_fn(tensor)
         
         # Returns: (C, T, H, W)
-        return tensor
+        return tensor, torch.tensor(self.labels[index])
 
     # --- INTERNAL HELPERS ---
 
     def _load_and_transform_video(self, path):
-        cap = cv2.VideoCapture(path)
-        frames = []
-        try:
-            while True:
-                ret, frame = cap.read()
-                if not ret: break
-                # Convert BGR (OpenCV) to RGB
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                frames.append(frame)
-        finally:
-            cap.release()
+        with av.open(path + ".avi") as container:
+            frames = [frame.to_ndarray(format="rgb24") for frame in container.decode(video=0)]
 
-        # Stack -> (T, H, W, C)
         video_tensor = torch.from_numpy(np.stack(frames))
         
         # Permute to (T, C, H, W) for Transforms
         video_tensor = video_tensor.permute(0, 3, 1, 2)
-
-        # Repeat Channels if Grayscale (T, 1, H, W) -> (T, 3, H, W)
-        if video_tensor.shape[1] == 1:
-            video_tensor = video_tensor.repeat(1, 3, 1, 1)
 
         # Apply Transform (Resize -> Crop -> ToTensor)
         video_tensor = self.transform(video_tensor)

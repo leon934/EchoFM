@@ -14,22 +14,19 @@ import json
 import os
 import time
 
-# import mae_st.util.env
-
+import mae_st.util.env
 import mae_st.util.misc as misc
-
 import numpy as np
-# import timm
+import timm
 import torch
 import torch.backends.cudnn as cudnn
 from iopath.common.file_io import g_pathmgr as pathmgr
 from mae_st import models_mae
 from mae_st.engine_pretrain import train_one_epoch
+from mae_st.util.kinetics import Kinetics
 from mae_st.util.misc import NativeScalerWithGradNormCount as NativeScaler
-
+from tensorboard.compat.tensorflow_stub.io.gfile import register_filesystem
 from torch.utils.tensorboard import SummaryWriter
-from data.dataset import EchoDataset_from_Video_mp4
-import torch.distributed as dist
 
 
 def get_args_parser():
@@ -111,10 +108,6 @@ def get_args_parser():
     parser.add_argument(
         "--output_dir",
         default="./output_dir",
-    )
-    parser.add_argument(
-        "--data_path",
-        default="/raid/camca/sk1064/us/fullset/video/",
         help="path where to save, empty for no saving",
     )
     parser.add_argument(
@@ -156,11 +149,11 @@ def get_args_parser():
     parser.add_argument("--decoder_embed_dim", default=512, type=int)
     parser.add_argument("--decoder_depth", default=8, type=int)
     parser.add_argument("--decoder_num_heads", default=16, type=int)
-    parser.add_argument("--t_patch_size", default=4, type=int)
-    parser.add_argument("--num_frames", default=32, type=int)
+    parser.add_argument("--t_patch_size", default=2, type=int)
+    parser.add_argument("--num_frames", default=16, type=int)
     parser.add_argument("--checkpoint_period", default=1, type=int)
     parser.add_argument("--sampling_rate", default=4, type=int)
-    parser.add_argument("--distributed", default=True, type=bool, help="Enable distributed training")
+    parser.add_argument("--distributed", action="store_true")
     parser.add_argument("--repeat_aug", default=4, type=int)
     parser.add_argument(
         "--clip_grad",
@@ -210,26 +203,7 @@ def get_args_parser():
 
 
 def main(args):
-    args.distributed = False
-
     misc.init_distributed_mode(args)
-
-    print("job dir: {}".format(os.path.dirname(os.path.realpath(__file__))))
-    print("{}".format(args).replace(", ", ",\n"))
-
-    # 멀티 GPU 초기화
-    # if args.distributed:
-    #     dist.init_process_group(backend="nccl", init_method=args.dist_url, rank=args.local_rank, world_size=args.world_size)
-    #     torch.cuda.set_device(args.local_rank)
-    if args.distributed:
-        if not dist.is_initialized():  # 이미 초기화된 경우 중복 호출 방지
-            dist.init_process_group(
-                backend="nccl", 
-                init_method=args.dist_url, 
-                rank=args.local_rank, 
-                world_size=args.world_size
-            )
-        torch.cuda.set_device(args.local_rank)
 
     print("job dir: {}".format(os.path.dirname(os.path.realpath(__file__))))
     print("{}".format(args).replace(", ", ",\n"))
@@ -243,11 +217,16 @@ def main(args):
 
     cudnn.benchmark = True
 
-    dataset_train = EchoDataset_from_Video_mp4(
-        folder=args.data_path,
-        num_frames=args.num_frames
+    dataset_train = Kinetics(
+        mode="pretrain",
+        path_to_data_dir=args.path_to_data_dir,
+        sampling_rate=args.sampling_rate,
+        num_frames=args.num_frames,
+        train_jitter_scales=(256, 320),
+        repeat_aug=args.repeat_aug,
+        jitter_aspect_relative=args.jitter_aspect_relative,
+        jitter_scales_relative=args.jitter_scales_relative,
     )
-    
     if args.distributed:
         num_tasks = misc.get_world_size()
         global_rank = misc.get_rank()
@@ -317,7 +296,7 @@ def main(args):
         beta = (0.9, 0.95)
     else:
         beta = args.beta
-    optimizer = torch.optim.AdamW(
+    optimizer = torch.optim._multi_tensor.AdamW(
         param_groups,
         lr=args.lr,
         betas=beta,

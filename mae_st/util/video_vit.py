@@ -1,4 +1,8 @@
-import EchoFM.util.logging as logging
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+
+
+import mae_st.util.logging as logging
 import torch
 import torch.nn as nn
 from timm.models.layers import to_2tuple
@@ -58,10 +62,9 @@ class PatchEmbed(nn.Module):
 
     def forward(self, x):
         B, C, T, H, W = x.shape
-        
-        assert (
-            H == self.img_size[0] and W == self.img_size[1]
-        ), f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
+        assert H == self.img_size[0] and W == self.img_size[1], (
+            f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
+        )
         assert T == self.frames, f"frame shape: {x.shape} and expected dim {self.frames}"
         x = self.proj(x).flatten(3)
         x = torch.einsum("ncts->ntsc", x)  # [N, T, H*W, C]
