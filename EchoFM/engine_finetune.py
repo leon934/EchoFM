@@ -84,7 +84,8 @@ def train_one_epoch(
                 samples, targets = mixup_fn(samples, targets)
 
         with torch.cuda.amp.autocast(enabled=not fp32):
-            outputs = model(samples)
+            outputs = model(samples).squeeze(-1)
+            targets = targets.squeeze(-1)
             loss = criterion(outputs, targets)
 
         loss_value = loss.item()
@@ -138,7 +139,7 @@ def train_one_epoch(
 
 @torch.no_grad()
 def evaluate(data_loader, model, device):
-    criterion = torch.nn.CrossEntropyLoss()
+    criterion = torch.nn.MSELoss()
 
     metric_logger = misc.MetricLogger(delimiter="  ")
     header = "Test:"
@@ -150,7 +151,7 @@ def evaluate(data_loader, model, device):
         images = batch[0]
         target = batch[-1]
         images = images.to(device, non_blocking=True)
-        target = target.to(device, non_blocking=True)
+        target = target.to(device, non_blocking=True).squeeze(-1)
 
         if len(images.shape) == 6:
             b, r, c, t, h, w = images.shape
@@ -159,21 +160,21 @@ def evaluate(data_loader, model, device):
 
         # compute output
         with torch.cuda.amp.autocast():
-            output = model(images)
+            output = model(images).squeeze(-1)
             loss = criterion(output, target)
+            mae = torch.mean(torch.abs(output - target))
 
-        acc1, acc5 = accuracy(output, target, topk=(1, 5))
+
+        #acc1, acc5 = accuracy(output, target, topk=(1, 5))
 
         batch_size = images.shape[0]
         metric_logger.update(loss=loss.item())
-        metric_logger.meters["acc1"].update(acc1.item(), n=batch_size)
-        metric_logger.meters["acc5"].update(acc5.item(), n=batch_size)
+        metric_logger.update(mae=mae.item())
+        #metric_logger.meters["acc1"].update(acc1.item(), n=batch_size)
+        #metric_logger.meters["acc5"].update(acc5.item(), n=batch_size)
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
-    print(
-        "* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}".format(
-            top1=metric_logger.acc1, top5=metric_logger.acc5, losses=metric_logger.loss
-        )
-    )
+    print( "* MSE {losses.global_avg:.4f} MAE {mae.global_avg:.4f}".format(
+         losses=metric_logger.loss, mae=metric_logger.mae ))
 
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
