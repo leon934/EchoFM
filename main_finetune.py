@@ -241,6 +241,8 @@ def main(args):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
+        persistent_workers=True,
+        timeout=300,
     )
 
     data_loader_val = torch.utils.data.DataLoader(
@@ -250,6 +252,8 @@ def main(args):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
+        persistent_workers=True,
+        timeout=300,
     )
 
     # define the model
