@@ -164,7 +164,7 @@ class LinearProbeMAE(nn.Module):
         
         # Apply normalization and head
         #x = self.bn(cls_token)
-        x = self.head(x)
+        x = self.head(cls_token)
         return x
 
 def main(args):
