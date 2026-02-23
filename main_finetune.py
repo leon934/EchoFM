@@ -265,6 +265,9 @@ def main(args):
         **vars(args),
     )
 
+    embed_dim = model.norm.weight.shape[0]
+    model.head = torch.nn.Linear(embed_dim, 1)
+
     checkpoint = torch.load(args.finetune, map_location="cpu", weights_only=False)
     checkpoint_model = checkpoint["model"]
 
