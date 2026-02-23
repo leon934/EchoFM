@@ -74,7 +74,7 @@ def get_args_parser():
     parser.add_argument("--local_rank", default=-1, type=int)
     parser.add_argument("--dist_on_itp", action="store_true")
     parser.add_argument("--dist_url", default="env://")
-    parser.add_argument("--distributed", default=True, type=bool)
+    parser.add_argument("--distributed", action="store_true")
 
     # MAE Specifics (Must be present to initialize model, even if unused for probing)
     parser.add_argument("--mask_ratio", default=0.0, type=float) # 0 for probing
