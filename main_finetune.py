@@ -74,7 +74,7 @@ def get_args_parser():
     parser.add_argument("--local_rank", default=-1, type=int)
     parser.add_argument("--dist_on_itp", action="store_true")
     parser.add_argument("--dist_url", default="env://")
-    parser.add_argument("--distributed", action="store_true")
+    parser.add_argument("--distributed", default=True, type=bool)
 
     # MAE Specifics (Must be present to initialize model, even if unused for probing)
     parser.add_argument("--mask_ratio", default=0.0, type=float) # 0 for probing
@@ -112,13 +112,12 @@ def get_args_parser():
 
     return parser
 
-"""
 class LinearProbeMAE(nn.Module):
-    
+    """
     Wraps a pre-trained MAE model for linear probing.
     Freezes the backbone, applies BN (affine=False) to the CLS token,
     and adds a Linear classification head.
-    
+    """
     def __init__(self, mae_model, num_classes):
         super().__init__()
         self.mae = mae_model
@@ -140,15 +139,15 @@ class LinearProbeMAE(nn.Module):
             if hasattr(self.mae, attr):
                 delattr(self.mae, attr)
 
-        # Freeze MAE parameters
-        for param in self.mae.parameters():
-            param.requires_grad = False
+        # Un-Freeze MAE parameters
+        #for param in self.mae.parameters():
+        #    param.requires_grad = False
             
         # Get embedding dimension (Standard MAE/ViT has embed_dim attribute)
         embed_dim = mae_model.norm.weight.shape[0] 
         
         # Batch Norm without affine as per MAE paper for linear probing
-        self.bn = nn.BatchNorm1d(embed_dim, affine=False, eps=1e-6)
+        #self.bn = nn.BatchNorm1d(embed_dim, affine=False, eps=1e-6)
         self.head = nn.Linear(embed_dim, num_classes)   
 
         # Initialize head
@@ -164,14 +163,12 @@ class LinearProbeMAE(nn.Module):
         cls_token = latent[:, 0]
         
         # Apply normalization and head
-        x = self.bn(cls_token)
+        #x = self.bn(cls_token)
         x = self.head(x)
         return x
-"""
-        
 
 def main(args):
-    #args.distributed = False
+    args.distributed = False
     misc.init_distributed_mode(args)
 
     print("job dir: {}".format(os.path.dirname(os.path.realpath(__file__))))
@@ -230,7 +227,6 @@ def main(args):
         num_tasks = 1
         global_rank = 0
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
-        sampler_val   = torch.utils.data.SequentialSampler(dataset_val)
 
     if global_rank == 0 and args.log_dir is not None:
         os.makedirs(args.log_dir, exist_ok=True)
@@ -265,9 +261,6 @@ def main(args):
         **vars(args),
     )
 
-    embed_dim = model.norm.weight.shape[0]
-    model.head = torch.nn.Linear(embed_dim, 1)
-
     checkpoint = torch.load(args.finetune, map_location="cpu", weights_only=False)
     checkpoint_model = checkpoint["model"]
 
@@ -275,13 +268,7 @@ def main(args):
     print(f"Missing keys:\n{missing_keys}")
     print(f"Unexpec keys:\n{unexpected_keys}")
 
-    # Reset regression head
-    print("Re-initializing prediction head for finetuning")
-    torch.nn.init.normal_(model.head.weight, std=0.02)
-    torch.nn.init.constant_(model.head.bias, 0)
-
-    #Remove Linear Probing
-    #model = LinearProbeMAE(model, num_classes=1)
+    model = LinearProbeMAE(model, num_classes=1)
 
     model.to(device)
 
@@ -382,7 +369,7 @@ def main(args):
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print("Training time {}".format(total_time_str))
     print(torch.cuda.memory_allocated())
-    return [checkpoint_path] if 'checkpoint_path' in locals() else []
+    return [checkpoint_path]
 
 
 def launch_one_thread(
