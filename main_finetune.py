@@ -112,12 +112,13 @@ def get_args_parser():
 
     return parser
 
+"""
 class LinearProbeMAE(nn.Module):
-    """
+    
     Wraps a pre-trained MAE model for linear probing.
     Freezes the backbone, applies BN (affine=False) to the CLS token,
     and adds a Linear classification head.
-    """
+    
     def __init__(self, mae_model, num_classes):
         super().__init__()
         self.mae = mae_model
@@ -166,9 +167,11 @@ class LinearProbeMAE(nn.Module):
         x = self.bn(cls_token)
         x = self.head(x)
         return x
+"""
+        
 
 def main(args):
-    args.distributed = False
+    #args.distributed = False
     misc.init_distributed_mode(args)
 
     print("job dir: {}".format(os.path.dirname(os.path.realpath(__file__))))
@@ -268,7 +271,13 @@ def main(args):
     print(f"Missing keys:\n{missing_keys}")
     print(f"Unexpec keys:\n{unexpected_keys}")
 
-    model = LinearProbeMAE(model, num_classes=1)
+    # Reset regression head
+    print("Re-initializing prediction head for finetuning")
+    torch.nn.init.normal_(model.head.weight, std=0.02)
+    torch.nn.init.constant_(model.head.bias, 0)
+
+    #Remove Linear Probing
+    #model = LinearProbeMAE(model, num_classes=1)
 
     model.to(device)
 
@@ -369,7 +378,7 @@ def main(args):
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print("Training time {}".format(total_time_str))
     print(torch.cuda.memory_allocated())
-    return [checkpoint_path]
+    return [checkpoint_path] if 'checkpoint_path' in locals() else []
 
 
 def launch_one_thread(

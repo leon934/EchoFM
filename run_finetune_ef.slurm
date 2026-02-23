@@ -30,12 +30,12 @@ torchrun \
   run_finetune.py \
   --data_path $SCRATCH/EchoNet-Dynamic \
   --batch_size 8 \
-  --epochs 20 \
+  --epochs 100 \
   --accum_iter 2 \
   --model mae_vit_large_patch16 \
   --finetune $SCRATCH/EchoFM_pretrain/checkpoint-00299.pth \
   --metric EF \
-  --blr 0.1 \
+  --blr 0.001 \
   --warmup_epochs 5 \
   --output_dir $SCRATCH/EchoFM_finetune_EF \
   --log_dir $SCRATCH/EchoFM_finetune_EF_logs \
