@@ -1,32 +1,52 @@
 #!/bin/bash
-
-##NECESSARY JOB SPECIFICATIONS
-#SBATCH --time=24:00:00
-#SBATCH --mem=80G
-#SBATCH --output=./jobs/%j_%x_output
-#SBATCH --nodes=1   
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=10
+#SBATCH -J echofm_finetune_esv
+#SBATCH -A 132677312274
+#SBATCH -p gpu
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=2
 #SBATCH --gres=gpu:a100:2
-#SBATCH --partition=gpu
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
+#SBATCH --time=10:00:00
+#SBATCH -o finetune_esv_%j.out
 
-#First Executable Line
-source ~/.bashrc
+echo "Starting job on $(hostname)"
+
 module load GCCcore/12.2.0 Python/3.10.8
-source .venv/bin/activate
+source $SCRATCH/echofm-env/bin/activate
+cd ~/EchoFM
 
-torchrun --nproc_per_node=2 run_finetune.py \
-    --batch_size 32 \
-    --epochs 400 \
-    --accum_iter 2 \
-    --model mae_vit_base_patch16 \
-    --finetune ./models/%j/checkpoint-00715.pth \
-    --metric ESV \
-    --blr 0.1 \
-    --warmup_epochs 30 \
-    --output_dir ./checkpoints_ft/esv \
-    --log_dir ./logs \
-    --data_path ./EchoNet-Dynamic \
-    --num_workers 9 \
-    --pin_mem \
-    --num_frames 16
+which python
+python -c "import torch; print(torch.__version__)"
+which torchrun
+
+# Distributed + stability settings
+export MASTER_ADDR=$(hostname)
+export MASTER_PORT=12356
+export NCCL_DEBUG=INFO
+export NCCL_SOCKET_IFNAME=^lo,docker
+export NCCL_IB_DISABLE=1
+export NCCL_BLOCKING_WAIT=1
+export NCCL_ASYNC_ERROR_HANDLING=1
+export OMP_NUM_THREADS=8
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128
+export TORCH_DATALOADER_TIMEOUT=1200
+
+torchrun \
+  --nproc_per_node=2 \
+  run_finetune.py \
+  --data_path $SCRATCH/EchoNet-Dynamic \
+  --batch_size 2 \
+  --epochs 75 \
+  --accum_iter 8 \
+  --model mae_vit_large_patch16 \
+  --finetune $SCRATCH/EchoFM_pretrain/checkpoint-00299.pth \
+  --resume $SCRATCH/EchoFM_finetune_ESV/checkpoint-00057.pth \
+  --metric ESV \
+  --blr 0.001 \
+  --warmup_epochs 5 \
+  --output_dir $SCRATCH/EchoFM_finetune_ESV \
+  --log_dir $SCRATCH/EchoFM_finetune_ESV_logs \
+  --num_workers 2 \
+  --num_frames 32 \
+  --pin_mem
